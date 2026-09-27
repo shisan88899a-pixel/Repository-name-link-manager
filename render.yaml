@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: jiaolong-link-manager
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT --timeout 120 app:app
+    healthCheckPath: /health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data
+      - key: COOKIE_SECURE
+        value: "1"
+    disk:
+      name: jiaolong-data
+      mountPath: /var/data
+      sizeGB: 1
