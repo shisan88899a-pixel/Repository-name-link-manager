@@ -34,15 +34,24 @@ def normalize_url(s):
     return s
 
 
-def is_jiaolong_url(value):
+def is_valid_url(value):
+    # Accept normal http/https URLs from any website. This makes TXT/CSV import
+    # tolerant of mixed link sources instead of silently dropping non-Jiaolong URLs.
     s=normalize_url(value)
     if not s: return False
     from urllib.parse import urlparse
     try:
-        host=(urlparse(s).hostname or '').lower().rstrip('.')
+        p=urlparse(s)
+        return p.scheme in ('http','https') and bool(p.hostname) and '.' in p.hostname
     except Exception:
         return False
-    return host == 'jiaolong.com' or host.endswith('.jiaolong.com')
+
+def extract_urls(text):
+    # Supports one URL per line, many URLs on one line, and URLs without scheme.
+    # Common separators and surrounding punctuation are stripped.
+    pattern=r'(?i)(?:https?://|www\.)[^\s,;，；<>\"\']+'
+    found=re.findall(pattern, text or '')
+    return [x.rstrip(').]}>，。；;') for x in found]
 
 def me(): return session.get('username')
 def is_admin(): return session.get('role')=='admin'
@@ -131,7 +140,7 @@ def check_add():
     if not me(): return jsonify(ok=False,message='请先登录'),401
     d=request.get_json(silent=True) or request.form; url=normalize_url(d.get('url')); user=(d.get('user') or me()).strip() if is_admin() else me()
     if not url:return jsonify(ok=False,message='请输入链接'),400
-    if not is_jiaolong_url(url): return jsonify(ok=False,message='请输入 www.jiaolong.com 的链接'),400
+    if not is_valid_url(url): return jsonify(ok=False,message='请输入有效的网址链接'),400
     con=db(); ex=con.execute('SELECT username,created_at FROM links WHERE url=?',(url,)).fetchone()
     if ex:
         log(con,'重复',user,url); con.commit(); con.close(); return jsonify(ok=True,exists=True,message=f'已存在（用户：{ex["username"]}）')
@@ -142,18 +151,39 @@ def import_file():
     if not me(): return jsonify(ok=False,message='请先登录'),401
     f=request.files.get('file'); user=(request.form.get('user') or me()).strip() if is_admin() else me()
     if not f:return jsonify(ok=False,message='请选择文件'),400
-    raw=f.read().decode('utf-8-sig',errors='ignore'); urls=[]
+    data=f.read()
+    raw=None
+    for enc in ('utf-8-sig','utf-16','gb18030','big5'):
+        try:
+            raw=data.decode(enc); break
+        except UnicodeDecodeError:
+            pass
+    if raw is None: raw=data.decode('utf-8',errors='ignore')
+
+    candidates=[]
     if f.filename.lower().endswith('.csv'):
         for row in csv.reader(io.StringIO(raw)):
             for cell in row:
-                if is_jiaolong_url(cell): urls.append(cell)
+                candidates.extend(extract_urls(cell))
+                if not extract_urls(cell) and is_valid_url(cell.strip()): candidates.append(cell.strip())
     else:
+        candidates=extract_urls(raw)
+        # Also accept a plain domain/path occupying a whole line, even without www/http.
         for line in raw.splitlines():
-            found=re.findall(r'https?://[^\s,;]+',line); candidates=found or ([line] if line.strip() else []); urls.extend([x for x in candidates if is_jiaolong_url(x)])
+            line=line.strip().strip('\"\'')
+            if line and not extract_urls(line) and is_valid_url(line): candidates.append(line)
+
+    # Preserve order while removing duplicate occurrences inside the uploaded file.
+    seen=set(); urls=[]
+    for item in candidates:
+        u=normalize_url(item)
+        if u and u not in seen:
+            seen.add(u); urls.append(u)
+
     added=dupes=invalid=0; con=db()
     for item in urls:
         u=normalize_url(item)
-        if not u:invalid+=1;continue
+        if not is_valid_url(u):invalid+=1;continue
         try: con.execute('INSERT INTO links(username,url,created_at) VALUES(?,?,?)',(user,u,now())); log(con,'新增',user,u); added+=1
         except sqlite3.IntegrityError:
             dupes+=1; log(con,'重复',user,u)
