@@ -15,8 +15,10 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE="Lax",SES
 class DB:
     def __init__(self): self.con=psycopg.connect(DATABASE_URL,row_factory=dict_row)
     def execute(self,sql,params=()): return self.con.execute(sql.replace("?", "%s"),params)
-    def executemany(self,sql,params): return self.con.executemany(sql.replace("?", "%s"),params)
-    def commit(self): self.con.commit()
+   def executemany(self,sql,params):
+    cur=self.con.cursor()
+    cur.executemany(sql.replace("?","%s"),params)
+    return cur
     def rollback(self): self.con.rollback()
     def close(self): self.con.close()
 def db(): return DB()
