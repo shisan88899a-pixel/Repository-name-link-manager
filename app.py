@@ -115,31 +115,99 @@ def user_item(uid):
 
 @app.route("/api/stats")
 def stats():
-    if not me():return jsonify(ok=False),401
-    con=db();scope="" if is_admin() else " WHERE username=?";args=() if is_admin() else (me(),)
-    total=con.execute("SELECT COUNT(*) n FROM links"+scope,args).fetchone()["n"];today=datetime.now().strftime("%Y-%m-%d")
+    if not me():
+        return jsonify(ok=False), 401
+
+    from datetime import timedelta
+
+    # 按北京时间 UTC+8 计算今天和昨天
+    utc_now = datetime.utcnow()
+    beijing_now = utc_now + timedelta(hours=8)
+
+    today_bj = beijing_now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    tomorrow_bj = today_bj + timedelta(days=1)
+    yesterday_bj = today_bj - timedelta(days=1)
+
+    # 数据库存储时间按 UTC 转换
+    today_start = (today_bj - timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+    tomorrow_start = (tomorrow_bj - timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+    yesterday_start = (yesterday_bj - timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+
+    con = db()
+
+    def get_stats(start=None, end=None):
+        time_sql = ""
+        params = []
+
+        if start and end:
+            time_sql = " AND a.created_at >= ? AND a.created_at < ?"
+            params = [start, end]
+
+        if is_admin():
+            sql = """
+                SELECT
+                    u.username,
+                    u.role,
+                    COALESCE(SUM(CASE WHEN a.action='新增' THEN 1 ELSE 0 END),0) added,
+                    COALESCE(SUM(CASE WHEN a.action='撤回' THEN 1 ELSE 0 END),0) withdrawn,
+                    COALESCE(SUM(CASE WHEN a.action='重复' THEN 1 ELSE 0 END),0) duplicates
+                FROM users u
+                LEFT JOIN activity a
+                    ON a.username=u.username
+            """ + time_sql + """
+                GROUP BY u.id,u.username,u.role
+                ORDER BY u.id
+            """
+            return list(con.execute(sql, tuple(params)).fetchall())
+
+        sql = """
+            SELECT
+                u.username,
+                u.role,
+                COALESCE(SUM(CASE WHEN a.action='新增' THEN 1 ELSE 0 END),0) added,
+                COALESCE(SUM(CASE WHEN a.action='撤回' THEN 1 ELSE 0 END),0) withdrawn,
+                COALESCE(SUM(CASE WHEN a.action='重复' THEN 1 ELSE 0 END),0) duplicates
+            FROM users u
+            LEFT JOIN activity a
+                ON a.username=u.username
+        """ + time_sql + """
+            WHERE u.username=?
+            GROUP BY u.id,u.username,u.role
+        """
+
+        return list(
+            con.execute(
+                sql,
+                tuple(params + [me()])
+            ).fetchall()
+        )
+
+    total_stats = get_stats()
+    today_stats = get_stats(today_start, tomorrow_start)
+    yesterday_stats = get_stats(yesterday_start, today_start)
+
     if is_admin():
-        today_add=con.execute("SELECT COUNT(*) n FROM links WHERE created_at LIKE ?",(today+"%",)).fetchone()["n"]
-        users=list(con.execute("SELECT username,COUNT(*) count FROM links GROUP BY username ORDER BY count DESC,username").fetchall())
-        withdrawn=con.execute("SELECT COUNT(*) n FROM activity WHERE action='撤回' AND created_at LIKE ?",(today+"%",)).fetchone()["n"]
+        total = con.execute("SELECT COUNT(*) n FROM links").fetchone()["n"]
+        user_count = con.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
     else:
-        today_add=con.execute("SELECT COUNT(*) n FROM links WHERE username=? AND created_at LIKE ?",(me(),today+"%")).fetchone()["n"];users=[{"username":me(),"count":total}]
-        withdrawn=con.execute("SELECT COUNT(*) n FROM activity WHERE action='撤回' AND username=? AND created_at LIKE ?",(me(),today+"%")).fetchone()["n"]
-    user_count=con.execute("SELECT COUNT(*) n FROM users").fetchone()["n"] if is_admin() else 1
-    if is_admin():
-        per_user=list(con.execute("""SELECT u.username,u.role,
-          COALESCE(SUM(CASE WHEN a.action='新增' THEN 1 ELSE 0 END),0) added,
-          COALESCE(SUM(CASE WHEN a.action='撤回' THEN 1 ELSE 0 END),0) withdrawn,
-          COALESCE(SUM(CASE WHEN a.action='重复' THEN 1 ELSE 0 END),0) duplicates
-          FROM users u LEFT JOIN activity a ON a.username=u.username
-          GROUP BY u.id,u.username,u.role ORDER BY u.id""").fetchall())
-    else:
-        r=con.execute("""SELECT ? username,? role,
-          COALESCE(SUM(CASE WHEN action='新增' THEN 1 ELSE 0 END),0) added,
-          COALESCE(SUM(CASE WHEN action='撤回' THEN 1 ELSE 0 END),0) withdrawn,
-          COALESCE(SUM(CASE WHEN action='重复' THEN 1 ELSE 0 END),0) duplicates
-          FROM activity WHERE username=?""",(me(),session.get("role"),me())).fetchone();per_user=[r]
-    con.close();return jsonify(total=total,today=today_add,withdrawn=withdrawn,user_count=user_count,users=users,per_user=per_user)
+        total = con.execute(
+            "SELECT COUNT(*) n FROM links WHERE username=?",
+            (me(),)
+        ).fetchone()["n"]
+        user_count = 1
+
+    con.close()
+
+    return jsonify(
+        ok=True,
+        total=total,
+        user_count=user_count,
+        per_user=total_stats,
+        today_per_user=today_stats,
+        yesterday_per_user=yesterday_stats
+    )
 
 @app.route("/api/check",methods=["POST"])
 def check_add():
