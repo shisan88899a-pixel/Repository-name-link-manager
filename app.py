@@ -206,6 +206,118 @@ def history():
     if not me():return jsonify(ok=False),401
     con=db();rows=list(con.execute("SELECT * FROM links ORDER BY id DESC LIMIT 100").fetchall()) if is_admin() else list(con.execute("SELECT * FROM links WHERE username=? ORDER BY id DESC LIMIT 100",(me(),)).fetchall());con.close()
     return jsonify(items=rows)
+@app.route("/api/links")
+def links():
+    if not me():
+        return jsonify(ok=False),401
+
+    user=(request.args.get("user") or me()).strip()
+    user=user if is_admin() else me()
+    limit=min(int(request.args.get("limit",300)),1000)
+
+    con=db()
+    rows=list(
+        con.execute(
+            "SELECT * FROM links WHERE username=? ORDER BY id DESC LIMIT ?",
+            (user,limit)
+        ).fetchall()
+    )
+    count=con.execute(
+        "SELECT COUNT(*) n FROM links WHERE username=?",
+        (user,)
+    ).fetchone()["n"]
+    con.close()
+
+    return jsonify(count=count,items=rows)
+
+
+@app.route("/api/history")
+def history():
+    if not me():
+        return jsonify(ok=False),401
+
+    con=db()
+
+    if is_admin():
+        rows=list(
+            con.execute(
+                "SELECT * FROM links ORDER BY id DESC LIMIT 100"
+            ).fetchall()
+        )
+    else:
+        rows=list(
+            con.execute(
+                "SELECT * FROM links WHERE username=? ORDER BY id DESC LIMIT 100",
+                (me(),)
+            ).fetchall()
+        )
+
+    con.close()
+    return jsonify(items=rows)
+
+
+@app.route("/api/account-records")
+def account_records():
+    if not me():
+        return jsonify(ok=False),401
+
+    if not is_admin():
+        return jsonify(ok=False,message="仅管理员可查看"),403
+
+    user=(request.args.get("user") or "").strip()
+    action=(request.args.get("action") or "").strip()
+
+    try:
+        page=max(int(request.args.get("page",1)),1)
+    except:
+        page=1
+
+    limit=100
+    offset=(page-1)*limit
+
+    con=db()
+
+    sql="""
+        SELECT id,action,username,url,created_at
+        FROM activity
+        WHERE username IN (
+            SELECT username FROM users WHERE role='user'
+        )
+    """
+    params=[]
+
+    if user:
+        sql+=" AND username=?"
+        params.append(user)
+
+    if action in ("新增","撤回","重复"):
+        sql+=" AND action=?"
+        params.append(action)
+
+    sql+=" ORDER BY id DESC LIMIT ? OFFSET ?"
+    params.extend([limit,offset])
+
+    rows=list(
+        con.execute(sql,tuple(params)).fetchall()
+    )
+
+    users=list(
+        con.execute(
+            "SELECT username FROM users WHERE role='user' ORDER BY id"
+        ).fetchall()
+    )
+
+    con.close()
+
+    return jsonify(
+        ok=True,
+        items=rows,
+        users=[u["username"] for u in users],
+        page=page,
+        has_more=len(rows)==limit
+    )
+
+
 @app.route("/api/delete/<int:link_id>",methods=["DELETE"])
 def delete(link_id):
     if not me():return jsonify(ok=False),401
