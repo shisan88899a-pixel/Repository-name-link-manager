@@ -206,29 +206,8 @@ def history():
     if not me():return jsonify(ok=False),401
     con=db();rows=list(con.execute("SELECT * FROM links ORDER BY id DESC LIMIT 100").fetchall()) if is_admin() else list(con.execute("SELECT * FROM links WHERE username=? ORDER BY id DESC LIMIT 100",(me(),)).fetchall());con.close()
     return jsonify(items=rows)
-@app.route("/api/links")
-def links():
-    if not me():
-        return jsonify(ok=False),401
 
-    user=(request.args.get("user") or me()).strip()
-    user=user if is_admin() else me()
-    limit=min(int(request.args.get("limit",300)),1000)
 
-    con=db()
-    rows=list(
-        con.execute(
-            "SELECT * FROM links WHERE username=? ORDER BY id DESC LIMIT ?",
-            (user,limit)
-        ).fetchall()
-    )
-    count=con.execute(
-        "SELECT COUNT(*) n FROM links WHERE username=?",
-        (user,)
-    ).fetchone()["n"]
-    con.close()
-
-    return jsonify(count=count,items=rows)
 
 
 @app.route("/api/history")
