@@ -1,29 +1,39 @@
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect
-import sqlite3, csv, io, os, re
+import csv, io, os, re
+import psycopg
+from psycopg.rows import dict_row
+from psycopg import IntegrityError
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 BASE=os.path.dirname(os.path.abspath(__file__))
-DATA_DIR=os.environ.get('DATA_DIR', BASE)
-os.makedirs(DATA_DIR, exist_ok=True)
-DB=os.path.join(DATA_DIR,'links.db')
+DATABASE_URL=os.environ.get('DATABASE_URL')
 app=Flask(__name__)
 app.secret_key=os.environ.get('SECRET_KEY','change-this-secret-before-public-use')
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','0')=='1')
 
-def db():
-    con=sqlite3.connect(DB); con.row_factory=sqlite3.Row; return con
+class DBConn:
+    def __init__(self):
+        if not DATABASE_URL:
+            raise RuntimeError('DATABASE_URL is not configured')
+        self.con=psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    def execute(self, sql, params=()):
+        return self.con.execute(sql.replace('?', '%s'), params)
+    def commit(self): return self.con.commit()
+    def rollback(self): return self.con.rollback()
+    def close(self): return self.con.close()
+
+def db(): return DBConn()
 
 def init_db():
-    con=db(); con.executescript('''
-    CREATE TABLE IF NOT EXISTS links(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL,url TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
-    CREATE INDEX IF NOT EXISTS idx_links_user ON links(username);
-    CREATE INDEX IF NOT EXISTS idx_links_created ON links(created_at DESC);
-    CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,username TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL);
-    ''')
+    con=db()
+    con.execute('CREATE TABLE IF NOT EXISTS links(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL,url TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL)')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_links_user ON links(username)')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_links_created ON links(created_at DESC)')
+    con.execute("CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL)")
+    con.execute('CREATE TABLE IF NOT EXISTS activity(id BIGSERIAL PRIMARY KEY,action TEXT NOT NULL,username TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL)')
     if not con.execute('SELECT 1 FROM users LIMIT 1').fetchone():
-        con.execute('INSERT OR IGNORE INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)',('十三',generate_password_hash('123456'),'admin',now()))
+        con.execute('INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?) ON CONFLICT (username) DO NOTHING',('十三',generate_password_hash('123456'),'admin',now()))
     con.commit(); con.close()
 
 def now(): return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -88,7 +98,7 @@ def users_api():
     d=request.get_json() or {}; u=(d.get('username') or '').strip(); p=d.get('password') or ''; role='admin' if d.get('role')=='admin' else 'user'
     if not u or len(p)<6: con.close(); return jsonify(ok=False,message='用户名不能为空，密码至少6位'),400
     try: con.execute('INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)',(u,generate_password_hash(p),role,now())); con.commit()
-    except sqlite3.IntegrityError: con.close(); return jsonify(ok=False,message='用户名已存在'),409
+    except IntegrityError: con.rollback(); con.close(); return jsonify(ok=False,message='用户名已存在'),409
     con.close(); return jsonify(ok=True)
 
 @app.route('/api/users/<int:uid>',methods=['DELETE','PATCH'])
@@ -184,8 +194,10 @@ def import_file():
     for item in urls:
         u=normalize_url(item)
         if not is_valid_url(u):invalid+=1;continue
-        try: con.execute('INSERT INTO links(username,url,created_at) VALUES(?,?,?)',(user,u,now())); log(con,'新增',user,u); added+=1
-        except sqlite3.IntegrityError:
+        row=con.execute('INSERT INTO links(username,url,created_at) VALUES(?,?,?) ON CONFLICT (url) DO NOTHING RETURNING id',(user,u,now())).fetchone()
+        if row:
+            log(con,'新增',user,u); added+=1
+        else:
             dupes+=1; log(con,'重复',user,u)
     con.commit();con.close();return jsonify(ok=True,added=added,duplicates=dupes,invalid=invalid,total=len(urls))
 
