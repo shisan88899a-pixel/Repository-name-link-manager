@@ -210,29 +210,7 @@ def history():
 
 
 
-@app.route("/api/history")
-def history():
-    if not me():
-        return jsonify(ok=False),401
 
-    con=db()
-
-    if is_admin():
-        rows=list(
-            con.execute(
-                "SELECT * FROM links ORDER BY id DESC LIMIT 100"
-            ).fetchall()
-        )
-    else:
-        rows=list(
-            con.execute(
-                "SELECT * FROM links WHERE username=? ORDER BY id DESC LIMIT 100",
-                (me(),)
-            ).fetchall()
-        )
-
-    con.close()
-    return jsonify(items=rows)
 
 
 @app.route("/api/account-records")
