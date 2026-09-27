@@ -13,14 +13,25 @@ app.secret_key=os.environ.get("SECRET_KEY","change-this-secret-before-public-use
 app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE="Lax",SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE","0")=="1")
 
 class DB:
-    def __init__(self): self.con=psycopg.connect(DATABASE_URL,row_factory=dict_row)
-    def execute(self,sql,params=()): return self.con.execute(sql.replace("?", "%s"),params)
-   def executemany(self,sql,params):
-    cur=self.con.cursor()
-    cur.executemany(sql.replace("?","%s"),params)
-    return cur
-    def rollback(self): self.con.rollback()
-    def close(self): self.con.close()
+    def __init__(self):
+        self.con = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+    def execute(self, sql, params=()):
+        return self.con.execute(sql.replace("?", "%s"), params)
+
+    def executemany(self, sql, params):
+        cur = self.con.cursor()
+        cur.executemany(sql.replace("?", "%s"), params)
+        return cur
+
+    def commit(self):
+        self.con.commit()
+
+    def rollback(self):
+        self.con.rollback()
+
+    def close(self):
+        return self.con.close()
 def db(): return DB()
 def now(): return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
