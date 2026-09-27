@@ -23,7 +23,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,username TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL);
     ''')
     if not con.execute('SELECT 1 FROM users LIMIT 1').fetchone():
-        con.execute('INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)',('十三',generate_password_hash('123456'),'admin',now()))
+        con.execute('INSERT OR IGNORE INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)',('十三',generate_password_hash('123456'),'admin',now()))
     con.commit(); con.close()
 
 def now(): return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
