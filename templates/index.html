@@ -7,12 +7,14 @@
 <section class="grid2"><div class="card"><h3>单条检查并新增</h3><textarea id="single" placeholder="粘贴一条网址链接"></textarea><div class="right"><button class="primary" onclick="checkAdd()">检查并新增</button></div><div id="checkMsg" class="msg">☑ 等待检查</div></div><div class="card"><h3>TXT / CSV 批量导入</h3><p>支持 TXT / CSV，可导入任意网站链接；支持一行一个或一行多个链接。</p><div class="fileline"><input type="file" id="file" accept=".txt,.csv"><button class="primary" onclick="importFile()">开始导入</button></div><div id="importMsg" class="msg">☑ 有导入权限</div></div></section>
 <section class="card"><h3>查看用户新增链接</h3><label>选择用户</label><div class="toolbar"><select id="userSelect" onchange="loadLinks()"></select><span id="countText"></span><button onclick="loadLinks()">刷新</button></div><div class="tablewrap"><table><thead><tr><th>新增时间</th><th>链接</th><th>操作</th></tr></thead><tbody id="linksBody"></tbody></table></div></section>
 <section class="card"><h3>最近100条新增历史</h3><p>管理员可查看全部；子账户只能查看自己的链接。</p><div class="tablewrap history"><table><thead><tr><th>时间</th><th>用户</th><th>链接</th><th>状态</th><th>操作</th></tr></thead><tbody id="historyBody"></tbody></table></div></section>
-</main><script><style>
+</main>
+<style>
 @keyframes checkingPulse{
   from{background:#16a34a;transform:scale(1)}
   to{background:#22c55e;transform:scale(1.06)}
 }
 </style>
+<script>
 const ROLE={{role|tojson}}, ME={{username|tojson}};const $=s=>document.querySelector(s);const esc=s=>(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 async function refreshUsers(){let d=await fetch('/api/stats').then(r=>r.json());document.querySelector('#sTotal').textContent=(d.total??0).toLocaleString();document.querySelector('#sToday').textContent=(d.today??0).toLocaleString();document.querySelector('#sWithdraw').textContent=(d.withdrawn??0).toLocaleString();document.querySelector('#sUsers').textContent=(d.user_count??0).toLocaleString();let tb=document.querySelector('#userStats');if(tb){tb.innerHTML=(d.per_user||[]).map(u=>`<tr><td>${esc(u.username)}</td><td>${u.role==='admin'?'管理员':'子账户'}</td><td style="color:green">${(u.added??0).toLocaleString()}</td><td>${(u.withdrawn??0).toLocaleString()}</td><td style="color:red">${(u.duplicates??0).toLocaleString()}</td></tr>`).join('')}}
 async function checkAdd(){let ta=document.querySelector('textarea');let btn=ta.parentElement.querySelector('button');let old=btn.textContent;btn.disabled=true;btn.textContent='检查中...';btn.style.background='#16a34a';btn.style.animation='checkingPulse .55s infinite alternate';try{let r=await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:ta.value})});let d=await r.json();checkMsg.textContent=d.message||'';checkMsg.style.color=d.added?'green':'red';await refreshAll()}catch(e){checkMsg.textContent='检查失败，请重试';checkMsg.style.color='red'}finally{btn.disabled=false;btn.textContent=old;btn.style.background='';btn.style.animation=''}}
