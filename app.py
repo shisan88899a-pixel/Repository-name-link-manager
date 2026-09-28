@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect
 import csv, io, os, re
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from werkzeug.security import generate_password_hash, check_password_hash
 import psycopg
@@ -33,7 +33,7 @@ class DB:
     def close(self):
         return self.con.close()
 def db(): return DB()
-def now(): return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def now(): return (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
 
 def init_db():
     con=db()
