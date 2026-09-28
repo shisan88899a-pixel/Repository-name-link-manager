@@ -428,76 +428,7 @@ def export_csv():
     data=io.BytesIO(("\ufeff"+out.getvalue()).encode());data.seek(0)
     return send_file(data,mimetype="text/csv",as_attachment=True,download_name="links.csv")
 init_db()
-@app.route("/api/extension-check", methods=["POST"])
-def extension_check():
-    if not me():
-        return jsonify(ok=False, status="error", message="请先登录"), 401
 
-    data = request.get_json(silent=True) or {}
-    url = (data.get("url") or "").strip()
-    
-    try:
-        friends = int(data.get("friends"))
-    except:
-        return jsonify(ok=False, status="error", message="无法识别好友数量"), 400
-
-    if not url:
-        return jsonify(ok=False, status="error", message="检查失败"), 400
-
-    if friends < 100:
-        return jsonify(ok=True, status="low", message="好友不足100，不新增")
-
-    if friends > 1000:
-        return jsonify(ok=True, status="high", message="好友超过1000，不新增")
-
-    con = db()
-
-    try:
-        row = con.execute(
-            "SELECT id FROM links WHERE url=? LIMIT 1",
-            (url,)
-        ).fetchone()
-
-        if row:
-            con.execute(
-                "INSERT INTO activity(action,username,url,created_at) VALUES(?,?,?,?)",
-                ("重复", me(), url, now())
-            )
-            con.commit()
-            return jsonify(
-                ok=True,
-                status="exists",
-                message="已存在，不新增"
-            )
-
-        con.execute(
-            "INSERT INTO links(username,url,created_at) VALUES(?,?,?)",
-            (me(), url, now())
-        )
-
-        con.execute(
-            "INSERT INTO activity(action,username,url,created_at) VALUES(?,?,?,?)",
-            ("新增", me(), url, now())
-        )
-
-        con.commit()
-
-        return jsonify(
-            ok=True,
-            status="added",
-            message="不存在，已自动新增"
-        )
-
-    except Exception as e:
-        con.rollback()
-        return jsonify(
-            ok=False,
-            status="error",
-            message="检查失败"
-        ), 500
-
-    finally:
-        con.close()
 @app.route("/health")
 def health():return jsonify(ok=True)
 if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT","8080")),debug=False)
