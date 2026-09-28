@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect
-import csv, io, os, re
+import csv, io, os, re, secrets
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -42,9 +42,13 @@ def init_db():
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_user ON links(username)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_created ON links(created_at DESC)")
         con.execute("CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL)")
+        con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS extension_token TEXT UNIQUE")
+        for r in con.execute("SELECT id FROM users WHERE extension_token IS NULL").fetchall():
+    con.execute("UPDATE users SET extension_token=? WHERE id=?",(secrets.token_urlsafe(24),r["id"]))
         con.execute("CREATE TABLE IF NOT EXISTS activity(id BIGSERIAL PRIMARY KEY,action TEXT NOT NULL,username TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL)")
         if not con.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-            con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?) ON CONFLICT (username) DO NOTHING",("十三",generate_password_hash("123456"),"admin",now()))
+            con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?) ON CONFLICT (username) DO NOTHING",("十三",generate_password_hash
+                                                                                                                                       ("123456"),"admin",now()))
         con.commit()
     finally: con.close()
 
@@ -87,11 +91,11 @@ def users_api():
     if not me() or not is_admin():return jsonify(ok=False,message="仅管理员可操作"),403
     con=db()
     if request.method=="GET":
-        rows=list(con.execute("SELECT id,username,role,created_at FROM users ORDER BY id").fetchall());con.close();return jsonify(items=rows)
+        rows=list(con.execute("SELECT id,username,role,created_at,extension_token FROM users ORDER BY id").fetchall());con.close();return jsonify(items=rows)
     d=request.get_json() or {};u=(d.get("username") or "").strip();p=d.get("password") or "";role="admin" if d.get("role")=="admin" else "user"
     if not u or len(p)<6:con.close();return jsonify(ok=False,message="用户名不能为空，密码至少6位"),400
     try:
-        con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",(u,generate_password_hash(p),role,now()));con.commit()
+        con.execute("INSERT INTO users(username,password_hash,role,created_at,extension_token) VALUES(?,?,?,?,?)",(u,generate_password_hash(p),role,now(),secrets.token_urlsafe(24)));con.commit()
     except psycopg.errors.UniqueViolation:
         con.rollback();con.close();return jsonify(ok=False,message="用户名已存在"),409
     con.close();return jsonify(ok=True)
@@ -222,8 +226,13 @@ def check_add():
     return jsonify(ok=True,exists=False,message="不存在，已自动新增")
 @app.route("/api/extension-check", methods=["POST"])
 def extension_check():
-    if not me():
-        return jsonify(ok=False, status="error", message="请先登录"), 401
+   token = request.headers.get("X-Extension-Token", "").strip()
+con_auth = db()
+auth_user = con_auth.execute("SELECT username FROM users WHERE extension_token=?",(token,)).fetchone()
+con_auth.close()
+if not auth_user:
+    return jsonify(ok=False, status="error", message="扩展授权码无效"), 401
+user = auth_user["username"]
 
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
@@ -253,7 +262,7 @@ def extension_check():
         if row:
             con.execute(
                 "INSERT INTO activity(action,username,url,created_at) VALUES(?,?,?,?)",
-                ("重复", me(), url, now())
+               ("重复", user, url, now())
             )
             con.commit()
             return jsonify(
@@ -264,12 +273,12 @@ def extension_check():
 
         con.execute(
             "INSERT INTO links(username,url,created_at) VALUES(?,?,?)",
-            (me(), url, now())
+            (user, url, now())
         )
 
         con.execute(
             "INSERT INTO activity(action,username,url,created_at) VALUES(?,?,?,?)",
-            ("新增", me(), url, now())
+            ("新增", user, url, now())
         )
 
         con.commit()
