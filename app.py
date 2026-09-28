@@ -41,7 +41,7 @@ def init_db():
         con.execute("CREATE TABLE IF NOT EXISTS links(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL,url TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_user ON links(username)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_created ON links(created_at DESC)")
-        con.execute("CREATE INDEX IF NOT EXISTS idx_links_url ON links(url)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_links_url_fast_lookup ON links(url)")
         con.execute("CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL)")
         con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS extension_token TEXT UNIQUE")
         con.execute("UPDATE users SET extension_token=NULL WHERE role='admin'")
