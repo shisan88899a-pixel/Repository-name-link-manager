@@ -44,7 +44,7 @@ def init_db():
         con.execute("CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL)")
         con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS extension_token TEXT UNIQUE")
         for r in con.execute("SELECT id FROM users WHERE extension_token IS NULL").fetchall():
-        con.execute("UPDATE users SET extension_token=? WHERE id=?",(secrets.token_urlsafe(24),r["id"]))
+                con.execute("UPDATE users SET extension_token=? WHERE id=?",(secrets.token_urlsafe(24),r["id"]))
         con.execute("CREATE TABLE IF NOT EXISTS activity(id BIGSERIAL PRIMARY KEY,action TEXT NOT NULL,username TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL)")
         if not con.execute("SELECT 1 FROM users LIMIT 1").fetchone():
             con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?) ON CONFLICT (username) DO NOTHING",("十三",generate_password_hash
