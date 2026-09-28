@@ -43,8 +43,11 @@ def init_db():
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_created ON links(created_at DESC)")
         con.execute("CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL)")
         con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS extension_token TEXT UNIQUE")
-        for r in con.execute("SELECT id FROM users WHERE extension_token IS NULL").fetchall():
+        con.execute("UPDATE users SET extension_token=NULL WHERE role='admin'")
+        for r in con.execute("SELECT id FROM users WHERE role='user' AND extension_token IS NULL").fetchall():
             con.execute("UPDATE users SET extension_token=? WHERE id=?",(secrets.token_urlsafe(24),r["id"]))
+        con.execute("CREATE TABLE IF NOT EXISTS extension_authorizations(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL,browser_id TEXT NOT NULL,authorized_at TEXT NOT NULL,UNIQUE(username,browser_id))")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_extension_authorizations_user_time ON extension_authorizations(username,authorized_at DESC)")
         con.execute("CREATE TABLE IF NOT EXISTS activity(id BIGSERIAL PRIMARY KEY,action TEXT NOT NULL,username TEXT NOT NULL,url TEXT,created_at TEXT NOT NULL)")
         if not con.execute("SELECT 1 FROM users LIMIT 1").fetchone():
             con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?) ON CONFLICT (username) DO NOTHING",("十三",generate_password_hash
@@ -91,11 +94,23 @@ def users_api():
     if not me() or not is_admin():return jsonify(ok=False,message="仅管理员可操作"),403
     con=db()
     if request.method=="GET":
-        rows=list(con.execute("SELECT id,username,role,created_at,extension_token FROM users ORDER BY id").fetchall());con.close();return jsonify(items=rows)
+        bj_now = datetime.utcnow() + timedelta(hours=8)
+        today_start = bj_now.replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+        yesterday_start = (bj_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        rows=list(con.execute("""
+            SELECT u.id,u.username,u.role,u.created_at,u.extension_token,
+                   CASE WHEN u.role='admin' THEN 0 ELSE COALESCE(SUM(CASE WHEN ea.authorized_at>=? THEN 1 ELSE 0 END),0) END today_authorizations,
+                   CASE WHEN u.role='admin' THEN 0 ELSE COALESCE(SUM(CASE WHEN ea.authorized_at>=? AND ea.authorized_at<? THEN 1 ELSE 0 END),0) END yesterday_authorizations
+            FROM users u
+            LEFT JOIN extension_authorizations ea ON ea.username=u.username
+            GROUP BY u.id,u.username,u.role,u.created_at,u.extension_token
+            ORDER BY u.id
+        """,(today_start,yesterday_start,today_start)).fetchall());con.close();return jsonify(items=rows)
     d=request.get_json() or {};u=(d.get("username") or "").strip();p=d.get("password") or "";role="admin" if d.get("role")=="admin" else "user"
     if not u or len(p)<6:con.close();return jsonify(ok=False,message="用户名不能为空，密码至少6位"),400
     try:
-        con.execute("INSERT INTO users(username,password_hash,role,created_at,extension_token) VALUES(?,?,?,?,?)",(u,generate_password_hash(p),role,now(),secrets.token_urlsafe(24)));con.commit()
+        token = None if role == "admin" else secrets.token_urlsafe(24)
+        con.execute("INSERT INTO users(username,password_hash,role,created_at,extension_token) VALUES(?,?,?,?,?)",(u,generate_password_hash(p),role,now(),token));con.commit()
     except psycopg.errors.UniqueViolation:
         con.rollback();con.close();return jsonify(ok=False,message="用户名已存在"),409
     con.close();return jsonify(ok=True)
@@ -112,7 +127,12 @@ def user_item(uid):
     if d.get("password"):
         if len(d["password"])<6:con.close();return jsonify(ok=False,message="密码至少6位"),400
         fields.append("password_hash=?");vals.append(generate_password_hash(d["password"]))
-    if d.get("role") in ("admin","user"):fields.append("role=?");vals.append(d["role"])
+    if d.get("role") in ("admin","user"):
+        new_role=d["role"];fields.append("role=?");vals.append(new_role)
+        if new_role=="admin":
+            fields.append("extension_token=?");vals.append(None)
+        elif row["role"]=="admin" or not row.get("extension_token"):
+            fields.append("extension_token=?");vals.append(secrets.token_urlsafe(24))
     if fields:
         vals.append(uid);con.execute("UPDATE users SET "+",".join(fields)+" WHERE id=?",vals);con.commit()
     con.close();return jsonify(ok=True)
@@ -224,6 +244,21 @@ def check_add():
         log(con,"重复",user,url);con.commit();con.close();return jsonify(ok=True,exists=True,message=f'已存在（用户：{ex["username"]}）')
     con.execute("INSERT INTO links(username,url,created_at) VALUES(?,?,?)",(user,url,now()));log(con,"新增",user,url);con.commit();con.close()
     return jsonify(ok=True,exists=False,message="不存在，已自动新增")
+@app.route("/api/extension-authorize", methods=["POST"])
+def extension_authorize():
+    token = request.headers.get("X-Extension-Token", "").strip()
+    data = request.get_json(silent=True) or {}
+    browser_id = (data.get("browser_id") or "").strip()
+    if not browser_id:
+        return jsonify(ok=False,message="缺少浏览器标识"),400
+    con=db()
+    user=con.execute("SELECT username,role FROM users WHERE extension_token=?",(token,)).fetchone()
+    if not user or user["role"]!="user":
+        con.close();return jsonify(ok=False,message="扩展授权码无效"),401
+    con.execute("INSERT INTO extension_authorizations(username,browser_id,authorized_at) VALUES(?,?,?) ON CONFLICT (username,browser_id) DO NOTHING",(user["username"],browser_id,now()))
+    con.commit();con.close()
+    return jsonify(ok=True,username=user["username"])
+
 @app.route("/api/extension-check", methods=["POST"])
 def extension_check():
     token = request.headers.get("X-Extension-Token", "").strip()
