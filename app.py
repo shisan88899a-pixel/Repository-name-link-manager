@@ -235,7 +235,7 @@ if not auth_user:
 user = auth_user["username"]
 
     data = request.get_json(silent=True) or {}
-    url = (data.get("url") or "").strip()
+url = (data.get("url") or "").strip()
 
     try:
         friends = int(data.get("friends"))
