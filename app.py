@@ -41,6 +41,7 @@ def init_db():
         con.execute("CREATE TABLE IF NOT EXISTS links(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL,url TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_user ON links(username)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_links_created ON links(created_at DESC)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_links_url ON links(url)")
         con.execute("CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',created_at TEXT NOT NULL)")
         con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS extension_token TEXT UNIQUE")
         con.execute("UPDATE users SET extension_token=NULL WHERE role='admin'")
@@ -275,19 +276,8 @@ def extension_check():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
 
-    try:
-        friends = int(data.get("friends"))
-    except:
-        return jsonify(ok=False, status="error", message="无法识别好友数量"), 400
-
     if not url:
         return jsonify(ok=False, status="error", message="检查失败"), 400
-
-    if friends < 100:
-        return jsonify(ok=True, status="low", message="好友不足100，不新增")
-
-    if friends > 1000:
-        return jsonify(ok=True, status="high", message="好友超过1000，不新增")
 
     con = db()
 
