@@ -226,13 +226,13 @@ def check_add():
     return jsonify(ok=True,exists=False,message="不存在，已自动新增")
 @app.route("/api/extension-check", methods=["POST"])
 def extension_check():
-   token = request.headers.get("X-Extension-Token", "").strip()
-con_auth = db()
-auth_user = con_auth.execute("SELECT username FROM users WHERE extension_token=?",(token,)).fetchone()
-con_auth.close()
-if not auth_user:
-    return jsonify(ok=False, status="error", message="扩展授权码无效"), 401
-user = auth_user["username"]
+    token = request.headers.get("X-Extension-Token", "").strip()
+    con_auth = db()
+    auth_user = con_auth.execute("SELECT username FROM users WHERE extension_token=?",(token,)).fetchone()
+    con_auth.close()
+    if not auth_user:
+        return jsonify(ok=False, status="error", message="扩展授权码无效"), 401
+    user = auth_user["username"]
 
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
