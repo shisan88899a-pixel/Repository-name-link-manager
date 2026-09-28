@@ -95,17 +95,20 @@ def users_api():
     con=db()
     if request.method=="GET":
         bj_now = datetime.utcnow() + timedelta(hours=8)
-        today_start = bj_now.replace(hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
-        yesterday_start = (bj_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        today_zero = bj_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_zero.strftime("%Y-%m-%d %H:%M:%S")
+        yesterday_start = (today_zero - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+        month_start = today_zero.replace(day=1).strftime("%Y-%m-%d %H:%M:%S")
         rows=list(con.execute("""
             SELECT u.id,u.username,u.role,u.created_at,u.extension_token,
                    CASE WHEN u.role='admin' THEN 0 ELSE COALESCE(SUM(CASE WHEN ea.authorized_at>=? THEN 1 ELSE 0 END),0) END today_authorizations,
-                   CASE WHEN u.role='admin' THEN 0 ELSE COALESCE(SUM(CASE WHEN ea.authorized_at>=? AND ea.authorized_at<? THEN 1 ELSE 0 END),0) END yesterday_authorizations
+                   CASE WHEN u.role='admin' THEN 0 ELSE COALESCE(SUM(CASE WHEN ea.authorized_at>=? AND ea.authorized_at<? THEN 1 ELSE 0 END),0) END yesterday_authorizations,
+                   CASE WHEN u.role='admin' THEN 0 ELSE COALESCE(SUM(CASE WHEN ea.authorized_at>=? THEN 1 ELSE 0 END),0) END month_authorizations
             FROM users u
             LEFT JOIN extension_authorizations ea ON ea.username=u.username
             GROUP BY u.id,u.username,u.role,u.created_at,u.extension_token
             ORDER BY u.id
-        """,(today_start,yesterday_start,today_start)).fetchall());con.close();return jsonify(items=rows)
+        """,(today_start,yesterday_start,today_start,month_start)).fetchall());con.close();return jsonify(items=rows)
     d=request.get_json() or {};u=(d.get("username") or "").strip();p=d.get("password") or "";role="admin" if d.get("role")=="admin" else "user"
     if not u or len(p)<6:con.close();return jsonify(ok=False,message="用户名不能为空，密码至少6位"),400
     try:
